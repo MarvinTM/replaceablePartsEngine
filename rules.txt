@@ -1,0 +1,31 @@
+Document 2: Detailed Engine Mechanics
+Base logic for the replaceableParts Engine (RPE).
+1. The Triad Constraint System
+The engine tracks three global integers that determine production capability:
+	•	Total Energy ($E$): Global integer. $E_{produced} - E_{consumed} = E_{available}$.
+	•	Global Floor Space ($S$): Global integer. Every machine and generator occupies $S$.
+	•	Global Inventory ($I$): The sum of all items held in the Warehouse and the output of Extraction Nodes.
+2. The Direct Accumulation Model
+Production is handled by Discrete Machine States interacting with the Global Inventory:
+	1	Requirement Check: Each machine has a RecipeList.
+	2	Pull Phase: If the machine is active and has Energy, it "queries" the Global Inventory for its next required ingredient.
+	3	Internal Buffer: The machine pulls the item (from Extraction Nodes or Warehouse) and stores it internally.
+	4	Completion & Execution: Once the internal buffer matches the RecipeList, the machine consumes the items and adds its output directly to the Global Inventory.
+	5	Efficiency: Production speed is naturally determined by the speed of Extraction Nodes and the availability of sub-components in the warehouse.
+3. The Research Hub (Weighted RNG)
+Research is a continuous process that consumes Energy to generate new Blueprints.
+	•	Weighted Probabilities: The engine favors blueprints that utilize materials already present in the Global Inventory (Proximity).
+4. Market Dynamics & Price Decay
+The Popularity of a FinalGood determines its Credit value.
+	•	Novelty: New products sell at a premium (up to 200%).
+	•	Decay: Continuous sales lower popularity (down to 50%).
+	•	Recovery: Zero sales over time allow popularity to slowly climb back to 100%, providing a "safety net" for older technologies.
+5. Prototype "Slotting" Puzzle
+Before a discovered Blueprint can be mass-produced, the player must solve a 2D "Slotting" puzzle. This represents the engineering challenge of assembling the new part for the first time.
+6. The World Map & Expansion
+	•	Scanning: Players spend Credits to reveal Resource Nodes.
+	•	Extraction: Once revealed, a node provides a constant trickle of raw materials directly into the Global Inventory.
+	•	Expansion: Credits are used to buy adjacent terrain, increasing the total Global Floor Space ($S$).
+
+
+

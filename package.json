@@ -1,0 +1,13 @@
+{
+  "name": "replaceable-parts-engine",
+  "version": "0.1.0",
+  "description": "A pure functional game engine for manufacturing simulation",
+  "type": "module",
+  "main": "src/engine.js",
+  "scripts": {
+    "start": "npx serve .",
+    "test": "node --test src/*.test.js"
+  },
+  "keywords": ["game", "simulation", "manufacturing"],
+  "license": "MIT"
+}

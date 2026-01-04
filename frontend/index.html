@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Replaceable Parts Engine</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    h1 {
+      color: #00d9ff;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+
+    h2 {
+      color: #00d9ff;
+      margin-bottom: 10px;
+      font-size: 1.1rem;
+      border-bottom: 1px solid #333;
+      padding-bottom: 5px;
+    }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .panel {
+      background: #16213e;
+      border-radius: 8px;
+      padding: 15px;
+      border: 1px solid #0f3460;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .stat {
+      background: #0f3460;
+      padding: 10px;
+      border-radius: 4px;
+      text-align: center;
+    }
+
+    .stat-label {
+      font-size: 0.8rem;
+      color: #888;
+    }
+
+    .stat-value {
+      font-size: 1.4rem;
+      font-weight: bold;
+      color: #00d9ff;
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+
+    button {
+      background: #0f3460;
+      color: #fff;
+      border: 1px solid #00d9ff;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    button:hover {
+      background: #00d9ff;
+      color: #1a1a2e;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    select {
+      background: #0f3460;
+      color: #fff;
+      border: 1px solid #00d9ff;
+      padding: 8px;
+      border-radius: 4px;
+    }
+
+    .inventory-list, .machines-list, .recipes-list {
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .item-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 5px 0;
+      border-bottom: 1px solid #0f3460;
+    }
+
+    .item-row:last-child {
+      border-bottom: none;
+    }
+
+    .machine-card {
+      background: #0f3460;
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+
+    .machine-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .machine-status {
+      font-size: 0.8rem;
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+
+    .status-idle { background: #666; }
+    .status-working { background: #28a745; }
+    .status-blocked { background: #dc3545; }
+
+    .machine-controls {
+      display: flex;
+      gap: 5px;
+      margin-top: 8px;
+    }
+
+    .machine-controls select {
+      flex: 1;
+      font-size: 0.85rem;
+    }
+
+    .machine-controls button {
+      padding: 4px 10px;
+      font-size: 0.85rem;
+    }
+
+    .recipe-item {
+      padding: 5px;
+      border-bottom: 1px solid #0f3460;
+    }
+
+    .recipe-item.discovered {
+      color: #ffc107;
+    }
+
+    .recipe-item.unlocked {
+      color: #28a745;
+    }
+
+    .generator-card {
+      background: #0f3460;
+      padding: 8px;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .extraction-node {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      font-size: 0.9rem;
+    }
+
+    .error-message {
+      color: #dc3545;
+      padding: 10px;
+      background: rgba(220, 53, 69, 0.2);
+      border-radius: 4px;
+      margin-bottom: 10px;
+      display: none;
+    }
+
+    .popularity-bar {
+      width: 50px;
+      height: 8px;
+      background: #333;
+      border-radius: 4px;
+      overflow: hidden;
+      display: inline-block;
+      margin-left: 10px;
+    }
+
+    .popularity-fill {
+      height: 100%;
+      background: #00d9ff;
+      transition: width 0.3s;
+    }
+
+    .auto-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .auto-controls label {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    /* Inventory sections */
+    .inventory-section {
+      margin-bottom: 12px;
+    }
+
+    .inventory-section:last-child {
+      margin-bottom: 0;
+    }
+
+    .section-label {
+      font-size: 0.75rem;
+      color: #00d9ff;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 5px;
+      padding-bottom: 3px;
+      border-bottom: 1px dashed #0f3460;
+    }
+
+    /* Recipe requirements */
+    .recipe-requirements {
+      font-size: 0.8rem;
+      color: #aaa;
+      margin: 5px 0;
+      padding: 5px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 3px;
+    }
+
+    .has-material {
+      color: #28a745;
+    }
+
+    .needs-material {
+      color: #dc3545;
+    }
+
+    .buffer-display {
+      font-size: 0.8rem;
+      color: #888;
+      margin-top: 5px;
+    }
+
+    /* Unblock button */
+    .unblock-btn {
+      padding: 2px 8px;
+      font-size: 0.75rem;
+      background: #dc3545;
+      border-color: #dc3545;
+      margin-left: 5px;
+    }
+
+    .unblock-btn:hover {
+      background: #ff6b6b;
+      border-color: #ff6b6b;
+    }
+
+    /* Inventory full warning */
+    .inventory-full {
+      background: rgba(220, 53, 69, 0.2);
+      border-radius: 3px;
+      padding: 2px 5px;
+    }
+
+    /* Tick log styles */
+    .tick-log {
+      max-height: 250px;
+      overflow-y: auto;
+    }
+
+    .log-entry {
+      padding: 8px;
+      margin-bottom: 5px;
+      background: #0f3460;
+      border-radius: 4px;
+      font-size: 0.85rem;
+    }
+
+    .log-tick {
+      font-weight: bold;
+      color: #00d9ff;
+    }
+
+    .log-time {
+      color: #666;
+      font-size: 0.75rem;
+      margin-left: 10px;
+    }
+
+    .log-events {
+      margin-top: 5px;
+      color: #aaa;
+      font-size: 0.8rem;
+    }
+
+    .log-events div {
+      margin: 2px 0;
+    }
+
+    /* Stats grid adjustment for 5 items */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+      gap: 10px;
+    }
+
+    /* Weight display */
+    .item-weight {
+      font-size: 0.7rem;
+      color: #666;
+    }
+
+    .item-total-weight {
+      font-size: 0.75rem;
+      color: #00d9ff;
+      font-weight: bold;
+    }
+
+    /* Disabled button */
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      border-color: #666;
+    }
+
+    button:disabled:hover {
+      background: #0f3460;
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <h1>Replaceable Parts Engine</h1>
+
+  <div id="error" class="error-message"></div>
+
+  <div class="dashboard">
+    <!-- Stats Panel -->
+    <div class="panel">
+      <h2>Status</h2>
+      <div class="stats-grid">
+        <div class="stat">
+          <div class="stat-label">Tick</div>
+          <div class="stat-value" id="tick">0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Credits</div>
+          <div class="stat-value" id="credits">0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Energy</div>
+          <div class="stat-value" id="energy">0/0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Floor Space</div>
+          <div class="stat-value" id="floorSpace">0/0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Storage Limit</div>
+          <div class="stat-value" id="inventorySpace">50</div>
+        </div>
+      </div>
+      <div class="controls" style="margin-top: 15px;">
+        <button id="btnSimulate">Simulate Tick</button>
+        <button id="btnSimulate10">+10 Ticks</button>
+        <button id="btnReset">Reset Game</button>
+      </div>
+      <div class="auto-controls">
+        <label>
+          <input type="checkbox" id="autoSimulate">
+          Auto-simulate
+        </label>
+        <select id="autoSpeed">
+          <option value="10000" selected>0.1 tick/sec</option>
+          <option value="1000">1 tick/sec</option>
+          <option value="500">2 ticks/sec</option>
+          <option value="200">5 ticks/sec</option>
+          <option value="100">10 ticks/sec</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Inventory Panel -->
+    <div class="panel">
+      <h2>Inventory</h2>
+      <div class="inventory-list" id="inventory">
+        <em>Empty</em>
+      </div>
+      <div class="controls" style="margin-top: 10px;">
+        <select id="sellItem"></select>
+        <button id="btnSell">Sell 1</button>
+        <button id="btnSellAll">Sell All</button>
+      </div>
+    </div>
+
+    <!-- Machines Panel -->
+    <div class="panel">
+      <h2>Machines</h2>
+      <div class="controls">
+        <button id="btnAddMachine">Add Machine (100 cr)</button>
+      </div>
+      <div class="machines-list" id="machines">
+        <em>No machines</em>
+      </div>
+    </div>
+
+    <!-- Generators Panel -->
+    <div class="panel">
+      <h2>Energy Generators</h2>
+      <div class="controls">
+        <select id="generatorType"></select>
+        <button id="btnAddGenerator">Add Generator</button>
+      </div>
+      <div id="generators">
+        <em>No generators</em>
+      </div>
+    </div>
+
+    <!-- Research Panel -->
+    <div class="panel">
+      <h2>Research</h2>
+      <div class="controls">
+        <button id="btnToggleResearch">Enable Research</button>
+        <span id="researchStatus">(Inactive - costs 5 energy)</span>
+      </div>
+      <h3 style="margin-top: 10px; font-size: 0.9rem; color: #888;">Discovered Recipes:</h3>
+      <div class="recipes-list" id="discoveredRecipes">
+        <em>None</em>
+      </div>
+    </div>
+
+    <!-- Extraction Nodes Panel -->
+    <div class="panel">
+      <h2>Extraction Nodes</h2>
+      <div id="extractionNodes">
+        <em>No nodes</em>
+      </div>
+    </div>
+
+    <!-- Floor Space Panel -->
+    <div class="panel">
+      <h2>Expand Factory</h2>
+      <div class="controls">
+        <button id="btnBuySpace10">Buy 10 Floor Space (100 cr)</button>
+        <button id="btnBuySpace50">Buy 50 Floor Space (500 cr)</button>
+      </div>
+      <div class="controls" style="margin-top: 5px;">
+        <button id="btnBuyInventorySpace">Expand Storage +25 (50 cr)</button>
+      </div>
+    </div>
+
+    <!-- Tick Log Panel -->
+    <div class="panel">
+      <h2>Event Log</h2>
+      <div class="tick-log" id="tickLog">
+        <em>No events yet</em>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
