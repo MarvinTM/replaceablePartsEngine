@@ -36,19 +36,23 @@ function deepClone(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
 
-function calculateTotalWeight(inventory, rules) {                
-  let total = 0;                                                 
-  for (const [itemId, qty] of Object.entries(inventory)) {       
-    const material = rules.materials.find(m => m.id === itemId); 
-    const weight = material ? material.weight : 1;               
-    total += weight * qty;                                       
-  }                                                              
-  return total;                                                  
-}                                                                
-
 function getItemWeight(itemId, rules) {
   const material = rules.materials.find(m => m.id === itemId);
   return material ? material.weight : 1;
+}
+
+function getMaxStack(itemId, inventoryCapacity, rules) {
+  const weight = getItemWeight(itemId, rules);
+  return Math.floor(inventoryCapacity / weight);
+}
+
+function calculateTotalWeight(inventory, rules) {
+  let total = 0;
+  for (const [itemId, qty] of Object.entries(inventory)) {
+    const weight = getItemWeight(itemId, rules);
+    total += weight * qty;
+  }
+  return total;
 }
 
 
@@ -61,16 +65,11 @@ function calculateEnergy(state, rules) {
 
   let consumed = 0;
 
-  // Machine consumption
+  // Machine consumption only (research is checked separately)
   for (const machine of state.machines) {
-    if (machine.recipeId && machine.status !== 'blocked') {
+    if (machine.enabled && machine.recipeId && machine.status !== 'blocked') {
       consumed += machine.energyConsumption;
     }
-  }
-
-  // Research consumption
-  if (state.research.active) {
-    consumed += state.research.energyConsumption;
   }
 
   return { produced, consumed };
@@ -96,7 +95,8 @@ function simulateTick(state, rules) {
     let deficit = energy.consumed - energy.produced;
     for (let i = newState.machines.length - 1; i >= 0 && deficit > 0; i--) {
       const machine = newState.machines[i];
-      if (machine.recipeId && machine.status !== 'blocked') {
+      // Only block enabled machines that are not already blocked
+      if (machine.enabled && machine.recipeId && machine.status !== 'blocked') {
         machine.status = 'blocked';
         deficit -= machine.energyConsumption;
       }
@@ -105,17 +105,16 @@ function simulateTick(state, rules) {
     newState.energy = calculateEnergy(newState, rules);
   }
 
-  // 2. Extraction Phase (respecting per-item limit based on weight)
+  // 2. Extraction Phase (respecting per-item limit)
   for (const node of newState.extractionNodes) {
     if (node.active) {
       const resourceId = node.resourceType;
-      const itemWeight = getItemWeight(resourceId, rules);                        
-const currentTotalWeight = calculateTotalWeight(newState.inventory, rules); 
-const weightCapacityLeft = newState.inventorySpace - currentTotalWeight;    
-const maxCanAdd = Math.floor(weightCapacityLeft / itemWeight);              
-const toAdd = Math.min(node.rate, maxCanAdd);                               
+      const currentAmount = newState.inventory[resourceId] || 0;
+      const maxStack = getMaxStack(resourceId, newState.inventorySpace, rules);
+      const spaceLeft = maxStack - currentAmount;
+      const toAdd = Math.min(node.rate, spaceLeft);
       if (toAdd > 0) {
-        newState.inventory[resourceId] = (newState.inventory[resourceId] || 0) + toAdd; 
+        newState.inventory[resourceId] = currentAmount + toAdd;
       }
       // Excess is wasted (not added)
     }
@@ -123,7 +122,7 @@ const toAdd = Math.min(node.rate, maxCanAdd);
 
   // 3. Machine Processing
   for (const machine of newState.machines) {
-    if (!machine.recipeId || machine.status === 'blocked') {
+    if (!machine.enabled || !machine.recipeId || machine.status === 'blocked') {
       continue;
     }
 
@@ -180,15 +179,14 @@ const toAdd = Math.min(node.rate, maxCanAdd);
         }
       }
 
-      // Add outputs to inventory (respecting per-item limit based on weight)
+      // Add outputs to inventory (respecting per-item limit)
       for (const [itemId, quantity] of Object.entries(recipe.outputs)) {
-        const itemWeight = getItemWeight(itemId, rules);                           
-        const currentTotalWeight = calculateTotalWeight(newState.inventory, rules);
-        const weightCapacityLeft = newState.inventorySpace - currentTotalWeight;   
-        const maxCanAdd = Math.floor(weightCapacityLeft / itemWeight);             
-        const toAdd = Math.min(quantity, maxCanAdd);                               
+        const currentAmount = newState.inventory[itemId] || 0;
+        const maxStack = getMaxStack(itemId, newState.inventorySpace, rules);
+        const spaceLeft = maxStack - currentAmount;
+        const toAdd = Math.min(quantity, spaceLeft);
         if (toAdd > 0) {
-          newState.inventory[itemId] = (newState.inventory[itemId] || 0) + toAdd;
+          newState.inventory[itemId] = currentAmount + toAdd;
         }
         // Excess is wasted
       }
@@ -196,7 +194,9 @@ const toAdd = Math.min(node.rate, maxCanAdd);
   }
 
   // 4. Research Phase
-  if (newState.research.active && newState.energy.produced >= newState.energy.consumed) {
+  // Research runs if active AND there's enough spare energy after machines
+  const spareEnergy = newState.energy.produced - newState.energy.consumed;
+  if (newState.research.active && spareEnergy >= rules.research.energyCost) {
     const roll = rng.next();
 
     // Calculate discovery chance with proximity bonus
@@ -285,6 +285,7 @@ function addMachine(state, rules, payload) {
     recipeId: null,
     internalBuffer: {},
     status: 'idle',
+    enabled: true,
     spaceUsed: spaceNeeded,
     energyConsumption: rules.machines.baseEnergy
   });
@@ -515,6 +516,23 @@ function unblockMachine(state, rules, payload) {
   return { state: newState, error: null };
 }
 
+function toggleMachine(state, rules, payload) {
+  const newState = deepClone(state);
+  const { machineId } = payload;
+
+  const machine = newState.machines.find(m => m.id === machineId);
+  if (!machine) {
+    return { state: newState, error: 'Machine not found' };
+  }
+
+  machine.enabled = !machine.enabled;
+
+  // Recalculate energy
+  newState.energy = calculateEnergy(newState, rules);
+
+  return { state: newState, error: null };
+}
+
 function buyInventorySpace(state, rules, payload) {
   const newState = deepClone(state);
   const { amount } = payload;
@@ -574,6 +592,9 @@ export function engine(state, rules, action) {
     case 'UNBLOCK_MACHINE':
       return unblockMachine(state, rules, action.payload);
 
+    case 'TOGGLE_MACHINE':
+      return toggleMachine(state, rules, action.payload);
+
     case 'BUY_INVENTORY_SPACE':
       return buyInventorySpace(state, rules, action.payload);
 
@@ -583,4 +604,4 @@ export function engine(state, rules, action) {
 }
 
 // Export utilities for testing
-export { createRNG, calculateEnergy, deepClone, calculateTotalWeight, getItemWeight };
+export { createRNG, calculateEnergy, deepClone, getItemWeight, getMaxStack, calculateTotalWeight };

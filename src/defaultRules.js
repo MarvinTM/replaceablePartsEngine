@@ -302,7 +302,7 @@ export const defaultRules = {
   // Research Configuration
   // ============================================================================
   research: {
-    energyCost: 5,           // Energy consumed per tick
+    energyCost: 3,           // Energy consumed per tick
     discoveryChance: 0.15,   // 15% chance per tick
     proximityWeight: 0.5     // +50% weight per matching inventory item
   },

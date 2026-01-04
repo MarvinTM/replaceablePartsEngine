@@ -1,4 +1,4 @@
-import { engine, calculateTotalWeight, getItemWeight } from '../src/engine.js';
+import { engine, calculateTotalWeight, getItemWeight, getMaxStack } from '../src/engine.js';
 import { defaultRules } from '../src/defaultRules.js';
 import { createInitialState } from '../src/initialState.js';
 
@@ -65,8 +65,11 @@ function generateTickLog(prevState, newState) {
 
       if (extracted > 0) {
         events.push(`Extracted ${extracted} ${name}`);
-      } else if (prevQty >= newState.inventorySpace) {
-        events.push(`${name} storage full (${newState.inventorySpace})`);
+      } else if (node.rate > 0 && extracted === 0) {
+        const maxStack = getMaxStack(node.resourceType, newState.inventorySpace, rules);
+        if (prevQty >= maxStack) {
+          events.push(`${name} storage full (${maxStack} max)`);
+        }
       }
     }
   }
@@ -131,7 +134,7 @@ function formatItemRow(itemId, qty) {
   const material = rules.materials.find(m => m.id === itemId);
   const name = material ? material.name : itemId;
   const weight = material ? material.weight : 1;
-  const totalItemWeight = weight * qty;
+  const maxStack = getMaxStack(itemId, gameState.inventorySpace, rules);
   const popularity = gameState.marketPopularity[itemId] || 1.0;
   const popPercent = Math.round((popularity / rules.market.maxPopularity) * 100);
 
@@ -139,7 +142,7 @@ function formatItemRow(itemId, qty) {
     <div class="item-row">
       <span>${name} <span class="item-weight">(w:${weight})</span></span>
       <span>
-        ${qty} <span class="item-total-weight">[${totalItemWeight}]</span>
+        ${qty}/${maxStack}
         <span class="popularity-bar">
           <div class="popularity-fill" style="width: ${popPercent}%"></div>
         </span>
@@ -270,11 +273,16 @@ function updateMachines() {
       ? `<button onclick="window.unblockMachine('${machine.id}')" class="unblock-btn">Unblock</button>`
       : '';
 
+    const toggleButton = `<button onclick="window.toggleMachine('${machine.id}')" class="toggle-btn">${machine.enabled ? 'Disable' : 'Enable'}</button>`;
+    const enabledBadge = machine.enabled ? '' : '<span class="disabled-badge">OFF</span>';
+
     return `
       <div class="machine-card">
         <div class="machine-header">
           <strong>Machine #${index + 1}</strong>
+          ${enabledBadge}
           <span class="machine-status status-${machine.status}">${machine.status}</span>
+          ${toggleButton}
           ${unblockButton}
         </div>
         <div>Recipe: ${recipeName}</div>
@@ -318,12 +326,14 @@ function updateResearch() {
   const status = document.getElementById('researchStatus');
   const container = document.getElementById('discoveredRecipes');
 
+  const energyCost = rules.research.energyCost;
+
   if (gameState.research.active) {
     btn.textContent = 'Disable Research';
-    status.textContent = '(Active - using 5 energy)';
+    status.textContent = `(Active - using ${energyCost} energy)`;
   } else {
     btn.textContent = 'Enable Research';
-    status.textContent = '(Inactive - costs 5 energy)';
+    status.textContent = `(Inactive - costs ${energyCost} energy)`;
   }
 
   // Show discovered recipes grouped by status
@@ -480,6 +490,13 @@ window.unlockRecipe = function(recipeId) {
 window.unblockMachine = function(machineId) {
   dispatch({
     type: 'UNBLOCK_MACHINE',
+    payload: { machineId }
+  });
+};
+
+window.toggleMachine = function(machineId) {
+  dispatch({
+    type: 'TOGGLE_MACHINE',
     payload: { machineId }
   });
 };

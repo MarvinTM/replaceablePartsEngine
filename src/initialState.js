@@ -19,13 +19,15 @@ export const initialState = {
     consumed: 0
   },
 
-  // Inventory space is now total weight capacity
+  // Inventory space is total capacity for per-item limits
   inventorySpace: 100,
 
-  // Inventory starts empty - will be filled by extraction nodes
-  inventory: {},
+  // Inventory starts with 1 production machine so player can build more
+  inventory: {
+    production_machine: 1
+  },
 
-  // No machines initially (must be manufactured)
+  // No machines deployed initially (must be deployed from inventory)
   machines: [],
 
   // Start with one manual crank generator for basic operation
@@ -119,10 +121,9 @@ export const initialState = {
     'steam_engine'
   ],
 
-  // Research starts inactive
+  // Research starts inactive (cost defined in rules)
   research: {
-    active: false,
-    energyConsumption: 5
+    active: false
   },
 
   // Market popularity (empty = all at default 1.0)
