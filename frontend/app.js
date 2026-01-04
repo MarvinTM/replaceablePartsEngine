@@ -1,4 +1,4 @@
-import { engine, calculateTotalWeight, getItemWeight, getMaxStack } from '../src/engine.js';
+import { engine, getItemWeight, getMaxStack } from '../src/engine.js';
 import { defaultRules } from '../src/defaultRules.js';
 import { createInitialState } from '../src/initialState.js';
 
@@ -125,9 +125,6 @@ function updateStats() {
     `${gameState.energy.consumed}/${gameState.energy.produced}`;
   document.getElementById('floorSpace').textContent =
     `${gameState.floorSpace.used}/${gameState.floorSpace.total}`;
-  const totalWeight = calculateTotalWeight(gameState.inventory, rules);
-  document.getElementById('inventorySpace').textContent =
-    `${totalWeight}/${gameState.inventorySpace}`;
 }
 
 function formatItemRow(itemId, qty) {

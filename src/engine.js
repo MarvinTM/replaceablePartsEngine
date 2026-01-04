@@ -46,16 +46,6 @@ function getMaxStack(itemId, inventoryCapacity, rules) {
   return Math.floor(inventoryCapacity / weight);
 }
 
-function calculateTotalWeight(inventory, rules) {
-  let total = 0;
-  for (const [itemId, qty] of Object.entries(inventory)) {
-    const weight = getItemWeight(itemId, rules);
-    total += weight * qty;
-  }
-  return total;
-}
-
-
 // ============================================================================
 // Energy Calculations
 // ============================================================================
@@ -604,4 +594,4 @@ export function engine(state, rules, action) {
 }
 
 // Export utilities for testing
-export { createRNG, calculateEnergy, deepClone, getItemWeight, getMaxStack, calculateTotalWeight };
+export { createRNG, calculateEnergy, deepClone, getItemWeight, getMaxStack };
