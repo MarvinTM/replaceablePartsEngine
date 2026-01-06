@@ -795,6 +795,6 @@ document.getElementById('autoSpeed').addEventListener('change', (e) => {
 // ============================================================================
 
 updateUI();
-console.log('Replaceable Parts Engine initialized');
+console.log('replaceableParts Engine initialized');
 console.log('Initial state:', gameState);
 console.log('Rules:', rules);
