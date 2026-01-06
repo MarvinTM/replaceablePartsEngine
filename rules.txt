@@ -1,31 +1,200 @@
-Document 2: Detailed Engine Mechanics
-Base logic for the replaceableParts Engine (RPE).
-1. The Triad Constraint System
-The engine tracks three global integers that determine production capability:
-	•	Total Energy ($E$): Global integer. $E_{produced} - E_{consumed} = E_{available}$.
-	•	Global Floor Space ($S$): Global integer. Every machine and generator occupies $S$.
-	•	Global Inventory ($I$): The sum of all items held in the Warehouse and the output of Extraction Nodes.
-2. The Direct Accumulation Model
-Production is handled by Discrete Machine States interacting with the Global Inventory:
-	1	Requirement Check: Each machine has a RecipeList.
-	2	Pull Phase: If the machine is active and has Energy, it "queries" the Global Inventory for its next required ingredient.
-	3	Internal Buffer: The machine pulls the item (from Extraction Nodes or Warehouse) and stores it internally.
-	4	Completion & Execution: Once the internal buffer matches the RecipeList, the machine consumes the items and adds its output directly to the Global Inventory.
-	5	Efficiency: Production speed is naturally determined by the speed of Extraction Nodes and the availability of sub-components in the warehouse.
-3. The Research Hub (Weighted RNG)
-Research is a continuous process that consumes Energy to generate new Blueprints.
-	•	Weighted Probabilities: The engine favors blueprints that utilize materials already present in the Global Inventory (Proximity).
-4. Market Dynamics & Price Decay
-The Popularity of a FinalGood determines its Credit value.
-	•	Novelty: New products sell at a premium (up to 200%).
-	•	Decay: Continuous sales lower popularity (down to 50%).
-	•	Recovery: Zero sales over time allow popularity to slowly climb back to 100%, providing a "safety net" for older technologies.
-5. Prototype "Slotting" Puzzle
-Before a discovered Blueprint can be mass-produced, the player must solve a 2D "Slotting" puzzle. This represents the engineering challenge of assembling the new part for the first time.
-6. The World Map & Expansion
-	•	Scanning: Players spend Credits to reveal Resource Nodes.
-	•	Extraction: Once revealed, a node provides a constant trickle of raw materials directly into the Global Inventory.
-	•	Expansion: Credits are used to buy adjacent terrain, increasing the total Global Floor Space ($S$).
+replaceableParts Engine - Detailed Mechanics
+=============================================
 
+1. Core Systems Overview
+------------------------
+The engine is a pure functional simulation where each tick advances the game state.
+Three primary constraints govern production:
+  - Energy: Generators produce energy, machines consume it
+  - Floor Space: A 2D grid where machines and generators must be placed
+  - Inventory: Weight-based storage with per-item limits
 
+2. Floor Space (2D Grid System)
+-------------------------------
+Floor space is a 2D rectangular grid where structures must be placed.
 
+Initial Grid: 8x8 cells (64 total cells)
+
+Structure Sizes (all perfect squares):
+  - Production Machine: 1x1 (1 cell)
+  - Manual Crank: 1x1 (1 cell)
+  - Water Wheel: 2x2 (4 cells)
+  - Steam Engine: 4x4 (16 cells)
+
+Placement Rules:
+  - Structures are placed at (x, y) coordinates
+  - Must fit entirely within grid bounds
+  - Cannot overlap with existing structures
+  - Position (0,0) is top-left corner
+
+Grid Expansion (Fractal Pattern):
+  The grid expands by adding square chunks, with chunk size doubling each time
+  a perfect square is completed:
+
+  Phase 1 (2x2 chunks):
+    8x8 -> 10x8 -> 12x8 -> 14x8 -> 16x8 (expand width)
+    16x8 -> 16x10 -> 16x12 -> 16x14 -> 16x16 (expand height, form square)
+
+  Phase 2 (4x4 chunks):
+    16x16 -> 20x16 -> 24x16 -> 28x16 -> 32x16 (expand width)
+    32x16 -> 32x20 -> 32x24 -> 32x28 -> 32x32 (expand height, form square)
+
+  Phase 3 (8x8 chunks):
+    32x32 -> 40x32 -> ... -> 64x64
+
+  Pattern continues indefinitely with chunk sizes: 2, 4, 8, 16, 32...
+
+  Expansion Cost: chunkSize^2 * 10 credits per expansion
+
+3. Energy System
+----------------
+Energy is produced by generators and consumed by active machines.
+
+Generator Types:
+  - Manual Crank: +3 energy, 1x1 size
+  - Water Wheel: +8 energy, 2x2 size
+  - Steam Engine: +15 energy, 4x4 size
+
+Machine Consumption:
+  - Each active machine with an assigned recipe consumes 2 energy per tick
+  - Disabled machines consume no energy
+
+Energy Blocking:
+  When energy consumed > energy produced:
+  - Machines are blocked starting from the most recently added
+  - Blocked machines stop processing until manually unblocked
+  - Players can disable machines to reduce energy consumption
+
+4. Inventory System (Weight-Based)
+----------------------------------
+Inventory uses a weight-based capacity system.
+
+Initial Capacity: 100 weight units
+
+Item Weights by Category:
+  - Raw Materials (wood, stone, ore, etc.): 1 weight
+  - Intermediate Products: 1-4 weight
+  - Final Goods: 5-12 weight
+  - Equipment (machines, generators): 8-25 weight
+
+Per-Item Stack Limit:
+  maxStack = floor(inventoryCapacity / itemWeight)
+  Example: 100 capacity, wood weight 1 = max 100 wood
+  Example: 100 capacity, steam engine weight 25 = max 4 steam engines
+
+Inventory Expansion:
+  - Each upgrade adds 50 weight capacity
+  - Cost grows exponentially: baseCost * (1.5 ^ upgradeLevel)
+  - Base cost: 50 credits
+
+5. Production System
+--------------------
+Machines process recipes to convert inputs into outputs.
+
+Production Cycle:
+  1. Pull Phase: Machine pulls required ingredients from inventory into internal buffer
+  2. Buffer Check: Once buffer contains all required inputs, attempt production
+  3. Space Check: Verify inventory has space for ALL outputs
+  4. Execution: If space available, consume buffer and add outputs to inventory
+
+Important: If inventory lacks space for outputs, the buffer is NOT consumed.
+The machine waits with ingredients intact until space becomes available.
+
+Recipe Structure:
+  - Inputs: Map of itemId -> quantity required
+  - Outputs: Map of itemId -> quantity produced
+  - Tier: 1-4 (affects discovery probability)
+
+Recipe Tiers:
+  Tier 1: Raw to basic intermediate (planks, charcoal, ingots)
+  Tier 2: Intermediate processing (plates, rods, gears, wire)
+  Tier 3: Final goods assembly (tools, motors, frames)
+  Tier 4: Equipment (production machines, generators)
+
+6. Research System
+------------------
+Research discovers new recipes over time.
+
+Requirements:
+  - Research must be enabled (toggle)
+  - Requires 3 spare energy (produced - consumed >= 3)
+
+Discovery:
+  - 15% base chance per tick
+  - Weighted toward recipes using materials already in inventory
+  - Proximity bonus: +50% weight per matching inventory item
+
+Recipe States:
+  - Undiscovered: Not yet found
+  - Discovered: Found but not usable
+  - Unlocked: Available for production
+
+7. Market System
+----------------
+Selling goods earns credits, with prices affected by market popularity.
+
+Price Formula: basePrice * popularity
+
+Popularity Mechanics:
+  - New items start at max popularity (200%)
+  - Selling decreases popularity by 5% per item sold
+  - Minimum popularity: 50%
+  - Maximum popularity: 200%
+  - Recovery: +2% per tick when not sold
+
+8. Extraction Nodes
+-------------------
+Pre-defined nodes that generate raw materials each tick.
+
+Default Nodes:
+  - Wood: +2/tick
+  - Stone: +2/tick
+  - Coal: +2/tick
+  - Iron Ore: +1/tick
+  - Copper Ore: +1/tick
+  - Clay: +1/tick
+  - Sand: +1/tick
+
+Extraction respects per-item inventory limits.
+Excess materials are discarded if storage is full.
+
+9. Tick Order of Operations
+---------------------------
+Each simulation tick executes in this order:
+
+  1. Energy Calculation
+     - Sum generator outputs
+     - Sum active machine consumption
+     - Block machines if deficit (newest first)
+
+  2. Extraction Phase
+     - Add raw materials from nodes (up to stack limit)
+
+  3. Machine Processing
+     - Pull ingredients from inventory to buffers
+     - Complete production if buffer full AND output space available
+
+  4. Research Phase
+     - If active and spare energy >= 3, roll for discovery
+
+  5. Market Recovery
+     - Increase popularity for unsold items
+
+  6. State Advance
+     - Increment tick counter
+     - Update RNG seed
+
+10. Equipment Deployment
+------------------------
+Machines and generators are deployed from inventory items.
+
+To Deploy:
+  1. Craft the equipment item (production_machine, manual_crank, etc.)
+  2. Select structure to place from dropdown
+  3. Click valid grid position to deploy
+  4. Item is consumed from inventory
+
+To Remove:
+  - Click Remove button on machine/generator
+  - For machines, buffered items return to inventory
+  - Structure is removed from grid, freeing space
