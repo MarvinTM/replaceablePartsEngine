@@ -312,12 +312,13 @@ export const defaultRules = {
   // ============================================================================
   machines: {
     itemId: 'production_machine',  // Item required to deploy a machine
-    baseSpace: 4,                  // Floor space units per machine
+    baseSpace: 1,                  // Floor space units per machine (1x1)
     baseEnergy: 2                  // Energy consumption per tick
   },
 
   // ============================================================================
   // Generator Types (deployed from inventory)
+  // All generators are perfect squares for grid placement
   // ============================================================================
   generators: {
     types: [
@@ -326,30 +327,33 @@ export const defaultRules = {
         itemId: 'manual_crank',    // Item required to deploy
         name: 'Manual Crank',
         energyOutput: 3,
-        spaceCost: 1
+        spaceCost: 1               // 1x1 grid
       },
       {
         id: 'water_wheel',
         itemId: 'water_wheel',
         name: 'Water Wheel',
         energyOutput: 8,
-        spaceCost: 4
+        spaceCost: 4               // 2x2 grid
       },
       {
         id: 'steam_engine',
         itemId: 'steam_engine',
         name: 'Steam Engine',
         energyOutput: 15,
-        spaceCost: 6
+        spaceCost: 16              // 4x4 grid
       }
     ]
   },
 
   // ============================================================================
-  // Floor Space
+  // Floor Space (2D Grid with fractal expansion)
   // ============================================================================
   floorSpace: {
-    costPerUnit: 10          // Credits per floor space unit
+    initialWidth: 8,         // Starting grid width
+    initialHeight: 8,        // Starting grid height
+    initialChunkSize: 2,     // Starting expansion chunk size (2x2)
+    costPerCell: 10          // Credits per cell when expanding
   },
 
   // ============================================================================

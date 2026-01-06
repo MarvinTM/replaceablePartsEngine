@@ -47,6 +47,101 @@ function getMaxStack(itemId, inventoryCapacity, rules) {
 }
 
 // ============================================================================
+// Grid Placement Utilities
+// ============================================================================
+
+function getStructureSize(spaceCost) {
+  // spaceCost is always a perfect square (1, 4, 9, 16, etc.)
+  return Math.sqrt(spaceCost);
+}
+
+function isWithinBounds(x, y, size, width, height) {
+  return x >= 0 && y >= 0 && x + size <= width && y + size <= height;
+}
+
+function isColliding(x, y, size, placements) {
+  // Check if the square from (x,y) to (x+size-1, y+size-1) overlaps any existing placement
+  for (const placement of placements) {
+    const pSize = placement.size;
+    // Check for rectangle overlap
+    const noOverlap =
+      x + size <= placement.x ||      // New is fully left of existing
+      placement.x + pSize <= x ||     // Existing is fully left of new
+      y + size <= placement.y ||      // New is fully above existing
+      placement.y + pSize <= y;       // Existing is fully above new
+
+    if (!noOverlap) {
+      return true; // Collision detected
+    }
+  }
+  return false;
+}
+
+function canPlaceAt(state, x, y, size) {
+  const { width, height, placements } = state.floorSpace;
+
+  if (!isWithinBounds(x, y, size, width, height)) {
+    return { valid: false, error: 'Position out of bounds' };
+  }
+
+  if (isColliding(x, y, size, placements)) {
+    return { valid: false, error: 'Position collides with existing structure' };
+  }
+
+  return { valid: true, error: null };
+}
+
+function getNextExpansionChunk(state, rules) {
+  const { width, height } = state.floorSpace;
+  const { initialWidth, initialChunkSize, costPerCell } = rules.floorSpace;
+
+  // Calculate current chunk size based on completed squares
+  // Chunk doubles each time a perfect square is formed
+  // Initial: 8x8, target 16x16, then 32x32, then 64x64, etc.
+  let chunkSize = initialChunkSize;
+  let targetSquare = initialWidth * 2; // First target: 16x16
+
+  // Find the current target square based on completed squares
+  while (width >= targetSquare && height >= targetSquare) {
+    chunkSize *= 2;
+    targetSquare *= 2;
+  }
+
+  // Determine expansion direction:
+  // 1. Expand width until it reaches targetSquare
+  // 2. Then expand height until it reaches targetSquare (forming a square)
+  // 3. Repeat with doubled chunk size
+  let expandWidth;
+  if (width < targetSquare) {
+    expandWidth = true;
+  } else {
+    expandWidth = false;
+  }
+
+  // Calculate new dimensions
+  let newWidth = width;
+  let newHeight = height;
+
+  if (expandWidth) {
+    newWidth = width + chunkSize;
+  } else {
+    newHeight = height + chunkSize;
+  }
+
+  const cellsAdded = chunkSize * chunkSize;
+  const cost = cellsAdded * costPerCell;
+
+  return {
+    chunkSize,
+    newWidth,
+    newHeight,
+    cellsAdded,
+    cost,
+    expandWidth
+  };
+}
+
+// ============================================================================
 // Energy Calculations
 // ============================================================================
 
@@ -244,12 +339,19 @@ function simulateTick(state, rules) {
 
 function addMachine(state, rules, payload) {
   const newState = deepClone(state);
+  const { x, y } = payload;
 
-  const spaceNeeded = rules.machines.baseSpace;
-  const spaceAvailable = newState.floorSpace.total - newState.floorSpace.used;
+  // Validate position is provided
+  if (typeof x !== 'number' || typeof y !== 'number') {
+    return { state: newState, error: 'Position (x, y) is required' };
+  }
 
-  if (spaceAvailable < spaceNeeded) {
-    return { state: newState, error: 'Not enough floor space' };
+  const size = getStructureSize(rules.machines.baseSpace);
+
+  // Check if position is valid and not colliding
+  const placement = canPlaceAt(newState, x, y, size);
+  if (!placement.valid) {
+    return { state: newState, error: placement.error };
   }
 
   // Check if we have the required item in inventory
@@ -268,16 +370,28 @@ function addMachine(state, rules, payload) {
     delete newState.inventory[requiredItemId];
   }
 
-  newState.floorSpace.used += spaceNeeded;
+  const machineId = generateId();
 
+  // Add to machines array
   newState.machines.push({
-    id: generateId(),
+    id: machineId,
     recipeId: null,
     internalBuffer: {},
     status: 'idle',
     enabled: true,
-    spaceUsed: spaceNeeded,
-    energyConsumption: rules.machines.baseEnergy
+    spaceUsed: rules.machines.baseSpace,
+    energyConsumption: rules.machines.baseEnergy,
+    x,
+    y
+  });
+
+  // Add to floor placements
+  newState.floorSpace.placements.push({
+    id: machineId,
+    x,
+    y,
+    size,
+    type: 'machine'
   });
 
   return { state: newState, error: null };
@@ -299,8 +413,14 @@ function removeMachine(state, rules, payload) {
     newState.inventory[itemId] = (newState.inventory[itemId] || 0) + quantity;
   }
 
-  newState.floorSpace.used -= machine.spaceUsed;
+  // Remove from machines array
   newState.machines.splice(machineIndex, 1);
+
+  // Remove from floor placements
+  const placementIndex = newState.floorSpace.placements.findIndex(p => p.id === machineId);
+  if (placementIndex !== -1) {
+    newState.floorSpace.placements.splice(placementIndex, 1);
+  }
 
   return { state: newState, error: null };
 }
@@ -339,16 +459,24 @@ function assignRecipe(state, rules, payload) {
 
 function addGenerator(state, rules, payload) {
   const newState = deepClone(state);
-  const { generatorType } = payload;
+  const { generatorType, x, y } = payload;
+
+  // Validate position is provided
+  if (typeof x !== 'number' || typeof y !== 'number') {
+    return { state: newState, error: 'Position (x, y) is required' };
+  }
 
   const genConfig = rules.generators.types.find(g => g.id === generatorType);
   if (!genConfig) {
     return { state: newState, error: 'Generator type not found' };
   }
 
-  const spaceAvailable = newState.floorSpace.total - newState.floorSpace.used;
-  if (spaceAvailable < genConfig.spaceCost) {
-    return { state: newState, error: 'Not enough floor space' };
+  const size = getStructureSize(genConfig.spaceCost);
+
+  // Check if position is valid and not colliding
+  const placement = canPlaceAt(newState, x, y, size);
+  if (!placement.valid) {
+    return { state: newState, error: placement.error };
   }
 
   // Check if we have the required item in inventory
@@ -367,13 +495,25 @@ function addGenerator(state, rules, payload) {
     delete newState.inventory[requiredItemId];
   }
 
-  newState.floorSpace.used += genConfig.spaceCost;
+  const generatorId = generateId();
 
+  // Add to generators array
   newState.generators.push({
-    id: generateId(),
+    id: generatorId,
     type: generatorType,
     energyOutput: genConfig.energyOutput,
-    spaceUsed: genConfig.spaceCost
+    spaceUsed: genConfig.spaceCost,
+    x,
+    y
+  });
+
+  // Add to floor placements
+  newState.floorSpace.placements.push({
+    id: generatorId,
+    x,
+    y,
+    size,
+    type: 'generator'
   });
 
   // Recalculate energy
@@ -391,9 +531,14 @@ function removeGenerator(state, rules, payload) {
     return { state: newState, error: 'Generator not found' };
   }
 
-  const generator = newState.generators[genIndex];
-  newState.floorSpace.used -= generator.spaceUsed;
+  // Remove from generators array
   newState.generators.splice(genIndex, 1);
+
+  // Remove from floor placements
+  const placementIndex = newState.floorSpace.placements.findIndex(p => p.id === generatorId);
+  if (placementIndex !== -1) {
+    newState.floorSpace.placements.splice(placementIndex, 1);
+  }
 
   // Recalculate energy
   newState.energy = calculateEnergy(newState, rules);
@@ -403,16 +548,17 @@ function removeGenerator(state, rules, payload) {
 
 function buyFloorSpace(state, rules, payload) {
   const newState = deepClone(state);
-  const { amount } = payload;
 
-  const cost = amount * rules.floorSpace.costPerUnit;
+  // Get the next expansion chunk based on current grid size
+  const expansion = getNextExpansionChunk(newState, rules);
 
-  if (newState.credits < cost) {
-    return { state: newState, error: 'Not enough credits' };
+  if (newState.credits < expansion.cost) {
+    return { state: newState, error: `Not enough credits (need ${expansion.cost})` };
   }
 
-  newState.credits -= cost;
-  newState.floorSpace.total += amount;
+  newState.credits -= expansion.cost;
+  newState.floorSpace.width = expansion.newWidth;
+  newState.floorSpace.height = expansion.newHeight;
 
   return { state: newState, error: null };
 }
@@ -593,5 +739,14 @@ export function engine(state, rules, action) {
   }
 }
 
-// Export utilities for testing
-export { createRNG, calculateEnergy, deepClone, getItemWeight, getMaxStack };
+// Export utilities for testing and frontend use
+export {
+  createRNG,
+  calculateEnergy,
+  deepClone,
+  getItemWeight,
+  getMaxStack,
+  getStructureSize,
+  canPlaceAt,
+  getNextExpansionChunk
+};

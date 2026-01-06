@@ -1,6 +1,12 @@
-import { engine, getItemWeight, getMaxStack } from '../src/engine.js';
+import { engine, getItemWeight, getMaxStack, getStructureSize, canPlaceAt, getNextExpansionChunk } from '../src/engine.js';
 import { defaultRules } from '../src/defaultRules.js';
 import { createInitialState } from '../src/initialState.js';
+
+// ============================================================================
+// Placement Mode State
+// ============================================================================
+
+let placementMode = null; // null or { type: 'machine' } or { type: 'generator', generatorType: 'manual_crank' }
 
 // ============================================================================
 // Game State
@@ -114,8 +120,10 @@ function updateUI() {
   updateSellDropdown();
   updateTickLog();
   updateInventorySpaceButton();
-  updateMachineButton();
-  populateGeneratorTypes();
+  updatePlacementTypeDropdown();
+  updatePlacementStatus();
+  renderFactoryGrid();
+  updateExpansionInfo();
 }
 
 function updateStats() {
@@ -124,7 +132,7 @@ function updateStats() {
   document.getElementById('energy').textContent =
     `${gameState.energy.consumed}/${gameState.energy.produced}`;
   document.getElementById('floorSpace').textContent =
-    `${gameState.floorSpace.used}/${gameState.floorSpace.total}`;
+    `${gameState.floorSpace.width}x${gameState.floorSpace.height}`;
 }
 
 function formatItemRow(itemId, qty) {
@@ -273,10 +281,12 @@ function updateMachines() {
     const toggleButton = `<button onclick="window.toggleMachine('${machine.id}')" class="toggle-btn">${machine.enabled ? 'Disable' : 'Enable'}</button>`;
     const enabledBadge = machine.enabled ? '' : '<span class="disabled-badge">OFF</span>';
 
+    const posInfo = typeof machine.x === 'number' ? `(${machine.x}, ${machine.y})` : '';
+
     return `
       <div class="machine-card">
         <div class="machine-header">
-          <strong>Machine #${index + 1}</strong>
+          <strong>Machine #${index + 1}</strong> <small style="color: #888;">${posInfo}</small>
           ${enabledBadge}
           <span class="machine-status status-${machine.status}">${machine.status}</span>
           ${toggleButton}
@@ -308,10 +318,11 @@ function updateGenerators() {
   container.innerHTML = gameState.generators.map(gen => {
     const genType = rules.generators.types.find(t => t.id === gen.type);
     const name = genType ? genType.name : gen.type;
+    const posInfo = typeof gen.x === 'number' ? `(${gen.x}, ${gen.y})` : '';
 
     return `
       <div class="generator-card">
-        <span>${name} (+${gen.energyOutput} energy)</span>
+        <span>${name} (+${gen.energyOutput} energy) <small style="color: #888;">${posInfo}</small></span>
         <button onclick="window.removeGenerator('${gen.id}')">Remove</button>
       </div>
     `;
@@ -395,29 +406,6 @@ function updateSellDropdown() {
   }).join('');
 }
 
-function populateGeneratorTypes() {
-  const select = document.getElementById('generatorType');
-  select.innerHTML = rules.generators.types.map(gen => {
-    const material = rules.materials.find(m => m.id === gen.itemId);
-    const itemName = material ? material.name : gen.itemId;
-    const available = gameState.inventory[gen.itemId] || 0;
-    return `<option value="${gen.id}">${gen.name} (+${gen.energyOutput}E) - needs ${itemName} (have: ${available})</option>`;
-  }).join('');
-}
-
-function updateMachineButton() {
-  const btn = document.getElementById('btnAddMachine');
-  if (!btn) return;
-
-  const requiredItemId = rules.machines.itemId;
-  const material = rules.materials.find(m => m.id === requiredItemId);
-  const itemName = material ? material.name : requiredItemId;
-  const available = gameState.inventory[requiredItemId] || 0;
-
-  btn.textContent = `Deploy Machine (need ${itemName}, have: ${available})`;
-  btn.disabled = available < 1;
-}
-
 function updateTickLog() {
   const container = document.getElementById('tickLog');
   if (!container) return;
@@ -450,6 +438,215 @@ function updateInventorySpaceButton() {
     rules.inventorySpace.baseCost * Math.pow(rules.inventorySpace.costGrowth, currentLevel)
   );
   btn.textContent = `Expand Storage +${rules.inventorySpace.upgradeAmount} (${cost} cr)`;
+}
+
+// ============================================================================
+// Factory Floor Grid Functions
+// ============================================================================
+
+function getPlacementSize() {
+  if (!placementMode) return 0;
+  if (placementMode.type === 'machine') {
+    return getStructureSize(rules.machines.baseSpace);
+  } else if (placementMode.type === 'generator') {
+    const genConfig = rules.generators.types.find(g => g.id === placementMode.generatorType);
+    return genConfig ? getStructureSize(genConfig.spaceCost) : 0;
+  }
+  return 0;
+}
+
+function renderFactoryGrid() {
+  const container = document.getElementById('factoryGrid');
+  if (!container) return;
+
+  const { width, height, placements } = gameState.floorSpace;
+
+  // Set grid template
+  container.style.gridTemplateColumns = `repeat(${width}, 30px)`;
+  container.style.gridTemplateRows = `repeat(${height}, 30px)`;
+
+  // Create a map of occupied cells for quick lookup
+  const occupiedMap = new Map();
+  for (const placement of placements) {
+    for (let dx = 0; dx < placement.size; dx++) {
+      for (let dy = 0; dy < placement.size; dy++) {
+        const key = `${placement.x + dx},${placement.y + dy}`;
+        occupiedMap.set(key, {
+          ...placement,
+          isOrigin: dx === 0 && dy === 0
+        });
+      }
+    }
+  }
+
+  // Generate cells
+  let html = '';
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const key = `${x},${y}`;
+      const occupied = occupiedMap.get(key);
+
+      let cellClass = 'grid-cell';
+      let content = '';
+
+      if (occupied) {
+        cellClass += ` occupied ${occupied.type}`;
+        if (occupied.isOrigin && occupied.size > 1) {
+          // Show label on origin cell for multi-cell structures
+          const label = occupied.type === 'machine' ? 'M' : 'G';
+          content = `<span class="structure-overlay" style="width: ${occupied.size * 30 + (occupied.size - 1)}px; height: ${occupied.size * 30 + (occupied.size - 1)}px;">${label}</span>`;
+        } else if (occupied.isOrigin && occupied.size === 1) {
+          const label = occupied.type === 'machine' ? 'M' : 'G';
+          content = `<span class="structure-overlay" style="width: 30px; height: 30px;">${label}</span>`;
+        }
+      }
+
+      html += `<div class="${cellClass}" data-x="${x}" data-y="${y}">${content}</div>`;
+    }
+  }
+
+  container.innerHTML = html;
+
+  // Add click handlers
+  container.querySelectorAll('.grid-cell').forEach(cell => {
+    cell.addEventListener('click', handleGridClick);
+    cell.addEventListener('mouseenter', handleGridHover);
+    cell.addEventListener('mouseleave', handleGridLeave);
+  });
+}
+
+function handleGridClick(event) {
+  const cell = event.currentTarget;
+  const x = parseInt(cell.dataset.x);
+  const y = parseInt(cell.dataset.y);
+
+  if (!placementMode) {
+    // Maybe show info about what's there?
+    return;
+  }
+
+  const size = getPlacementSize();
+  const placement = canPlaceAt(gameState, x, y, size);
+
+  if (!placement.valid) {
+    showError(placement.error);
+    return;
+  }
+
+  // Dispatch the appropriate action
+  if (placementMode.type === 'machine') {
+    dispatch({
+      type: 'ADD_MACHINE',
+      payload: { x, y }
+    });
+  } else if (placementMode.type === 'generator') {
+    dispatch({
+      type: 'ADD_GENERATOR',
+      payload: { generatorType: placementMode.generatorType, x, y }
+    });
+  }
+
+  // Keep placement mode active for quick multi-placement
+}
+
+function handleGridHover(event) {
+  if (!placementMode) return;
+
+  const cell = event.currentTarget;
+  const x = parseInt(cell.dataset.x);
+  const y = parseInt(cell.dataset.y);
+  const size = getPlacementSize();
+
+  // Highlight the cells that would be occupied
+  const container = document.getElementById('factoryGrid');
+  const placement = canPlaceAt(gameState, x, y, size);
+  const isValid = placement.valid;
+
+  for (let dx = 0; dx < size; dx++) {
+    for (let dy = 0; dy < size; dy++) {
+      const targetCell = container.querySelector(`[data-x="${x + dx}"][data-y="${y + dy}"]`);
+      if (targetCell) {
+        targetCell.classList.add(isValid ? 'preview' : 'preview-invalid');
+      }
+    }
+  }
+}
+
+function handleGridLeave(event) {
+  // Remove all preview highlights
+  const container = document.getElementById('factoryGrid');
+  container.querySelectorAll('.preview, .preview-invalid').forEach(cell => {
+    cell.classList.remove('preview', 'preview-invalid');
+  });
+}
+
+function updatePlacementTypeDropdown() {
+  const select = document.getElementById('placementType');
+  if (!select) return;
+
+  let options = '<option value="">-- Select Structure --</option>';
+
+  // Machine option
+  const machineItem = rules.machines.itemId;
+  const machineAvailable = gameState.inventory[machineItem] || 0;
+  const machineSize = getStructureSize(rules.machines.baseSpace);
+  const machineMaterial = rules.materials.find(m => m.id === machineItem);
+  const machineName = machineMaterial ? machineMaterial.name : machineItem;
+  options += `<option value="machine" ${machineAvailable < 1 ? 'disabled' : ''}>
+    ${machineName} (${machineSize}x${machineSize}) - have: ${machineAvailable}
+  </option>`;
+
+  // Generator options
+  for (const gen of rules.generators.types) {
+    const genAvailable = gameState.inventory[gen.itemId] || 0;
+    const genSize = getStructureSize(gen.spaceCost);
+    options += `<option value="generator:${gen.id}" ${genAvailable < 1 ? 'disabled' : ''}>
+      ${gen.name} (${genSize}x${genSize}, +${gen.energyOutput}E) - have: ${genAvailable}
+    </option>`;
+  }
+
+  select.innerHTML = options;
+}
+
+function updatePlacementStatus() {
+  const status = document.getElementById('placementStatus');
+  const cancelBtn = document.getElementById('btnCancelPlacement');
+  if (!status) return;
+
+  if (placementMode) {
+    let name = '';
+    if (placementMode.type === 'machine') {
+      name = 'Production Machine';
+    } else if (placementMode.type === 'generator') {
+      const gen = rules.generators.types.find(g => g.id === placementMode.generatorType);
+      name = gen ? gen.name : placementMode.generatorType;
+    }
+    status.textContent = `Click grid to place: ${name}`;
+    status.classList.remove('inactive');
+    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+  } else {
+    status.textContent = 'Select a structure to place';
+    status.classList.add('inactive');
+    if (cancelBtn) cancelBtn.style.display = 'none';
+  }
+}
+
+function updateExpansionInfo() {
+  const info = document.getElementById('expansionInfo');
+  const btn = document.getElementById('btnExpandGrid');
+  if (!info || !btn) return;
+
+  const expansion = getNextExpansionChunk(gameState, rules);
+  const { width, height } = gameState.floorSpace;
+
+  info.innerHTML = `
+    Current: ${width}x${height} (${width * height} cells)<br>
+    Next expansion: +${expansion.chunkSize}x${expansion.chunkSize} chunk
+    → ${expansion.newWidth}x${expansion.newHeight}
+  `;
+
+  btn.textContent = `Expand Grid (${expansion.cost} cr)`;
+  btn.disabled = gameState.credits < expansion.cost;
 }
 
 // ============================================================================
@@ -515,16 +712,34 @@ document.getElementById('btnSimulate10').addEventListener('click', () => {
 document.getElementById('btnReset').addEventListener('click', () => {
   gameState = createInitialState();
   tickLog = [];
+  placementMode = null;
   updateUI();
 });
 
-document.getElementById('btnAddMachine').addEventListener('click', () => {
-  dispatch({ type: 'ADD_MACHINE', payload: {} });
+// Placement type selector
+document.getElementById('placementType').addEventListener('change', (e) => {
+  const value = e.target.value;
+  if (!value) {
+    placementMode = null;
+  } else if (value === 'machine') {
+    placementMode = { type: 'machine' };
+  } else if (value.startsWith('generator:')) {
+    const generatorType = value.split(':')[1];
+    placementMode = { type: 'generator', generatorType };
+  }
+  updatePlacementStatus();
 });
 
-document.getElementById('btnAddGenerator').addEventListener('click', () => {
-  const generatorType = document.getElementById('generatorType').value;
-  dispatch({ type: 'ADD_GENERATOR', payload: { generatorType } });
+// Cancel placement button
+document.getElementById('btnCancelPlacement').addEventListener('click', () => {
+  placementMode = null;
+  document.getElementById('placementType').value = '';
+  updatePlacementStatus();
+});
+
+// Grid expansion button
+document.getElementById('btnExpandGrid').addEventListener('click', () => {
+  dispatch({ type: 'BUY_FLOOR_SPACE', payload: {} });
 });
 
 document.getElementById('btnToggleResearch').addEventListener('click', () => {
@@ -547,14 +762,6 @@ document.getElementById('btnSellAll').addEventListener('click', () => {
   if (itemId && qty > 0) {
     dispatch({ type: 'SELL_GOODS', payload: { itemId, quantity: qty } });
   }
-});
-
-document.getElementById('btnBuySpace10').addEventListener('click', () => {
-  dispatch({ type: 'BUY_FLOOR_SPACE', payload: { amount: 10 } });
-});
-
-document.getElementById('btnBuySpace50').addEventListener('click', () => {
-  dispatch({ type: 'BUY_FLOOR_SPACE', payload: { amount: 50 } });
 });
 
 document.getElementById('btnBuyInventorySpace').addEventListener('click', () => {
@@ -587,7 +794,6 @@ document.getElementById('autoSpeed').addEventListener('change', (e) => {
 // Initialize
 // ============================================================================
 
-populateGeneratorTypes();
 updateUI();
 console.log('Replaceable Parts Engine initialized');
 console.log('Initial state:', gameState);

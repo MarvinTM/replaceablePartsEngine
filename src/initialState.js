@@ -8,10 +8,14 @@ export const initialState = {
   rngSeed: 12345,
   credits: 500,
 
-  // Triad Constraints
+  // Floor Space (2D Grid)
   floorSpace: {
-    total: 50,
-    used: 1  // Starting generator uses 1 space
+    width: 8,
+    height: 8,
+    placements: [
+      // Starting generator at position (0, 0)
+      { id: 'starter_crank', x: 0, y: 0, size: 1, type: 'generator' }
+    ]
   },
 
   energy: {
@@ -36,7 +40,9 @@ export const initialState = {
       id: 'starter_crank',
       type: 'manual_crank',
       energyOutput: 3,
-      spaceUsed: 1
+      spaceUsed: 1,
+      x: 0,
+      y: 0
     }
   ],
 
