@@ -1,5 +1,5 @@
 /**
- * Replaceable Parts Engine
+ * replaceableParts Engine
  * A pure functional game engine for manufacturing simulation
  */
 
@@ -256,25 +256,34 @@ function simulateTick(state, rules) {
     }
 
     if (bufferComplete) {
-      // Consume buffer
-      for (const [itemId, needed] of Object.entries(recipe.inputs)) {
-        machine.internalBuffer[itemId] -= needed;
-        if (machine.internalBuffer[itemId] === 0) {
-          delete machine.internalBuffer[itemId];
-        }
-      }
-
-      // Add outputs to inventory (respecting per-item limit)
+      // First check if there's space for ALL outputs before consuming inputs
+      let canProduce = true;
       for (const [itemId, quantity] of Object.entries(recipe.outputs)) {
         const currentAmount = newState.inventory[itemId] || 0;
         const maxStack = getMaxStack(itemId, newState.inventorySpace, rules);
         const spaceLeft = maxStack - currentAmount;
-        const toAdd = Math.min(quantity, spaceLeft);
-        if (toAdd > 0) {
-          newState.inventory[itemId] = currentAmount + toAdd;
+        if (spaceLeft < quantity) {
+          canProduce = false;
+          break;
         }
-        // Excess is wasted
       }
+
+      if (canProduce) {
+        // Consume buffer
+        for (const [itemId, needed] of Object.entries(recipe.inputs)) {
+          machine.internalBuffer[itemId] -= needed;
+          if (machine.internalBuffer[itemId] === 0) {
+            delete machine.internalBuffer[itemId];
+          }
+        }
+
+        // Add outputs to inventory
+        for (const [itemId, quantity] of Object.entries(recipe.outputs)) {
+          const currentAmount = newState.inventory[itemId] || 0;
+          newState.inventory[itemId] = currentAmount + quantity;
+        }
+      }
+      // If can't produce, buffer stays intact - machine waits for space
     }
   }
 
